@@ -1,0 +1,32 @@
+{
+  "tests": [
+    {
+      "name": "Login with valid credentials",
+      "method": "POST",
+      "body": {
+        "username": "123",
+        "password": "123"
+      },
+      "expectedStatus": 200,
+      "expectedBody": {
+        "id": "number",
+        "username": "string",
+        "role": "string"
+      },
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Login with invalid credentials",
+      "method": "POST",
+      "body": {
+        "username": "wrong",
+        "password": "wrong"
+      },
+      "expectedStatus": 401,
+      "expectedBody": {
+        "error": "string"
+      },
+      "bodyMatcher": "partial"
+    }
+  ]
+}

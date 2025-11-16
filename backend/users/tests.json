@@ -1,0 +1,28 @@
+{
+  "tests": [
+    {
+      "name": "Get all users",
+      "method": "GET",
+      "expectedStatus": 200,
+      "expectedBody": [],
+      "bodyMatcher": "type"
+    },
+    {
+      "name": "Create new user",
+      "method": "POST",
+      "body": {
+        "username": "testuser",
+        "password": "testpass",
+        "full_name": "Test User",
+        "role": "operator",
+        "phone_extension": "2000"
+      },
+      "expectedStatus": 201,
+      "expectedBody": {
+        "id": "number",
+        "message": "string"
+      },
+      "bodyMatcher": "partial"
+    }
+  ]
+}

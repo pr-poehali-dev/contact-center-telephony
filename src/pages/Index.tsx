@@ -1,37 +1,231 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import Icon from "@/components/ui/icon";
 import { Badge } from "@/components/ui/badge";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { toast } from "sonner";
+
+const API_BASE = {
+  auth: "https://functions.poehali.dev/3485a554-5cc2-43d6-8e1f-ca0520a63d4e",
+  users: "https://functions.poehali.dev/cb482cc1-eb6b-4fe2-8787-e6c451cb0865",
+  calls: "https://functions.poehali.dev/2f1fdd03-69fe-4997-8a4b-0440e231d2a5"
+};
+
+type User = {
+  id: number;
+  username: string;
+  full_name: string;
+  role: string;
+  status: string;
+  phone_extension: string;
+};
+
+type Call = {
+  id: number;
+  caller_number: string;
+  operator_name: string;
+  status: string;
+  duration: number;
+  started_at: string;
+  notes: string;
+};
 
 const Index = () => {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [activeSection, setActiveSection] = useState("dashboard");
+  const [users, setUsers] = useState<User[]>([]);
+  const [calls, setCalls] = useState<Call[]>([]);
+  const [loading, setLoading] = useState(false);
+  
+  const [isDialpadOpen, setIsDialpadOpen] = useState(false);
+  const [dialNumber, setDialNumber] = useState("");
+  
+  const [isEditUserOpen, setIsEditUserOpen] = useState(false);
+  const [isAddUserOpen, setIsAddUserOpen] = useState(false);
+  const [editingUser, setEditingUser] = useState<User | null>(null);
+  const [newUser, setNewUser] = useState({
+    username: "",
+    password: "",
+    full_name: "",
+    role: "operator",
+    phone_extension: ""
+  });
 
-  const handleLogin = (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (username && password) {
-      setIsAuthenticated(true);
+    setLoading(true);
+    
+    try {
+      const response = await fetch(API_BASE.auth, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, password })
+      });
+      
+      const data = await response.json();
+      
+      if (response.ok) {
+        setCurrentUser(data);
+        setIsAuthenticated(true);
+        toast.success("Вход выполнен успешно!");
+      } else {
+        toast.error(data.error || "Неверный логин или пароль");
+      }
+    } catch (error) {
+      toast.error("Ошибка подключения к серверу");
+    } finally {
+      setLoading(false);
     }
   };
 
-  const stats = [
-    { label: "Активных звонков", value: "12", icon: "Phone", trend: "+3", color: "text-green-600" },
-    { label: "Операторов на линии", value: "24", icon: "Users", trend: "+2", color: "text-blue-600" },
-    { label: "Среднее время ответа", value: "45с", icon: "Clock", trend: "-5с", color: "text-orange-600" },
-    { label: "Уровень сервиса", value: "94%", icon: "TrendingUp", trend: "+2%", color: "text-green-600" },
-  ];
+  const loadUsers = async () => {
+    try {
+      const response = await fetch(API_BASE.users);
+      const data = await response.json();
+      setUsers(data);
+    } catch (error) {
+      toast.error("Ошибка загрузки пользователей");
+    }
+  };
 
-  const recentCalls = [
-    { id: 1, client: "ООО \"Рога и Копыта\"", operator: "Иванов И.И.", duration: "12:34", status: "completed", time: "10:23" },
-    { id: 2, client: "ИП Петров", operator: "Сидорова А.С.", duration: "08:15", status: "completed", time: "10:15" },
-    { id: 3, client: "ЗАО \"Технологии\"", operator: "Смирнов П.К.", duration: "15:42", status: "active", time: "10:08" },
-    { id: 4, client: "ООО \"Инновации\"", operator: "Кузнецова М.В.", duration: "05:23", status: "completed", time: "09:58" },
-  ];
+  const loadCalls = async () => {
+    try {
+      const response = await fetch(API_BASE.calls);
+      const data = await response.json();
+      setCalls(data);
+    } catch (error) {
+      toast.error("Ошибка загрузки звонков");
+    }
+  };
+
+  useEffect(() => {
+    if (isAuthenticated) {
+      loadUsers();
+      loadCalls();
+      const interval = setInterval(() => {
+        loadUsers();
+        loadCalls();
+      }, 5000);
+      return () => clearInterval(interval);
+    }
+  }, [isAuthenticated]);
+
+  const handleDialpadClick = (digit: string) => {
+    setDialNumber(prev => prev + digit);
+  };
+
+  const handleCall = async () => {
+    if (!dialNumber) {
+      toast.error("Введите номер телефона");
+      return;
+    }
+
+    try {
+      const response = await fetch(API_BASE.calls, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "initiate",
+          caller_number: dialNumber
+        })
+      });
+
+      const data = await response.json();
+      
+      if (response.ok) {
+        toast.success(data.message);
+        setIsDialpadOpen(false);
+        setDialNumber("");
+        loadCalls();
+      } else {
+        toast.error(data.error);
+      }
+    } catch (error) {
+      toast.error("Ошибка при совершении звонка");
+    }
+  };
+
+  const handleUpdateUser = async () => {
+    if (!editingUser) return;
+
+    try {
+      const response = await fetch(API_BASE.users, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(editingUser)
+      });
+
+      const data = await response.json();
+      
+      if (response.ok) {
+        toast.success("Пользователь обновлен");
+        setIsEditUserOpen(false);
+        loadUsers();
+      } else {
+        toast.error(data.error);
+      }
+    } catch (error) {
+      toast.error("Ошибка обновления пользователя");
+    }
+  };
+
+  const handleAddUser = async () => {
+    if (!newUser.username || !newUser.password || !newUser.full_name) {
+      toast.error("Заполните все обязательные поля");
+      return;
+    }
+
+    try {
+      const response = await fetch(API_BASE.users, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(newUser)
+      });
+
+      const data = await response.json();
+      
+      if (response.ok) {
+        toast.success("Пользователь добавлен");
+        setIsAddUserOpen(false);
+        setNewUser({
+          username: "",
+          password: "",
+          full_name: "",
+          role: "operator",
+          phone_extension: ""
+        });
+        loadUsers();
+      } else {
+        toast.error(data.error);
+      }
+    } catch (error) {
+      toast.error("Ошибка добавления пользователя");
+    }
+  };
+
+  const handleDeleteUser = async (userId: number) => {
+    if (!confirm("Вы уверены, что хотите удалить этого пользователя?")) return;
+
+    try {
+      const response = await fetch(`${API_BASE.users}?id=${userId}`, {
+        method: "DELETE"
+      });
+
+      if (response.ok) {
+        toast.success("Пользователь удален");
+        loadUsers();
+      }
+    } catch (error) {
+      toast.error("Ошибка удаления пользователя");
+    }
+  };
 
   const menuItems = [
     { id: "dashboard", label: "Дашборд", icon: "LayoutDashboard" },
@@ -41,6 +235,26 @@ const Index = () => {
     { id: "clients", label: "Клиенты", icon: "Building2" },
     { id: "settings", label: "Настройки", icon: "Settings" },
   ];
+
+  const getStatusBadgeColor = (status: string) => {
+    const colors = {
+      online: "bg-green-500",
+      offline: "bg-gray-500",
+      busy: "bg-red-500",
+      break: "bg-yellow-500"
+    };
+    return colors[status as keyof typeof colors] || "bg-gray-500";
+  };
+
+  const getStatusLabel = (status: string) => {
+    const labels = {
+      online: "Онлайн",
+      offline: "Офлайн",
+      busy: "Занят",
+      break: "Перерыв"
+    };
+    return labels[status as keyof typeof labels] || status;
+  };
 
   if (!isAuthenticated) {
     return (
@@ -52,8 +266,8 @@ const Index = () => {
                 <Icon name="Phone" size={32} className="text-white" />
               </div>
             </div>
-            <CardTitle className="text-2xl font-semibold">Система телефонии</CardTitle>
-            <CardDescription>Вход для сотрудников контакт-центра</CardDescription>
+            <CardTitle className="text-2xl font-semibold">Система телефонии Sity-contact</CardTitle>
+            <CardDescription>Вход только для сотрудников КЦ Sity-contact</CardDescription>
           </CardHeader>
           <CardContent>
             <form onSubmit={handleLogin} className="space-y-4">
@@ -79,8 +293,8 @@ const Index = () => {
                   required
                 />
               </div>
-              <Button type="submit" className="w-full">
-                Войти в систему
+              <Button type="submit" className="w-full" disabled={loading}>
+                {loading ? "Вход..." : "Войти в систему"}
               </Button>
             </form>
           </CardContent>
@@ -88,6 +302,213 @@ const Index = () => {
       </div>
     );
   }
+
+  const renderDashboard = () => {
+    const onlineOperators = users.filter(u => u.role === 'operator' && u.status === 'online');
+    const activeCalls = calls.filter(c => c.status === 'active');
+    
+    return (
+      <div className="space-y-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+          <Card className="hover:shadow-lg transition-shadow">
+            <CardContent className="pt-6">
+              <div className="flex items-start justify-between">
+                <div>
+                  <p className="text-sm font-medium text-muted-foreground">Активных звонков</p>
+                  <div className="flex items-baseline gap-2 mt-2">
+                    <h3 className="text-3xl font-bold">{activeCalls.length}</h3>
+                  </div>
+                </div>
+                <div className="p-3 rounded-lg bg-slate-100">
+                  <Icon name="Phone" size={24} className="text-slate-600" />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="hover:shadow-lg transition-shadow">
+            <CardContent className="pt-6">
+              <div className="flex items-start justify-between">
+                <div>
+                  <p className="text-sm font-medium text-muted-foreground">Операторов на линии</p>
+                  <div className="flex items-baseline gap-2 mt-2">
+                    <h3 className="text-3xl font-bold">{onlineOperators.length}</h3>
+                  </div>
+                </div>
+                <div className="p-3 rounded-lg bg-slate-100">
+                  <Icon name="Users" size={24} className="text-slate-600" />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="hover:shadow-lg transition-shadow">
+            <CardContent className="pt-6">
+              <div className="flex items-start justify-between">
+                <div>
+                  <p className="text-sm font-medium text-muted-foreground">Всего звонков</p>
+                  <div className="flex items-baseline gap-2 mt-2">
+                    <h3 className="text-3xl font-bold">{calls.length}</h3>
+                  </div>
+                </div>
+                <div className="p-3 rounded-lg bg-slate-100">
+                  <Icon name="BarChart3" size={24} className="text-slate-600" />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="hover:shadow-lg transition-shadow">
+            <CardContent className="pt-6">
+              <div className="flex items-start justify-between">
+                <div>
+                  <p className="text-sm font-medium text-muted-foreground">Всего сотрудников</p>
+                  <div className="flex items-baseline gap-2 mt-2">
+                    <h3 className="text-3xl font-bold">{users.length}</h3>
+                  </div>
+                </div>
+                <div className="p-3 rounded-lg bg-slate-100">
+                  <Icon name="UserCheck" size={24} className="text-slate-600" />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Активные операторы</CardTitle>
+            <CardDescription>Операторы онлайн и доступны для приема звонков</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-3">
+              {onlineOperators.map((user) => (
+                <div key={user.id} className="flex items-center justify-between p-4 border border-slate-200 rounded-lg">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 bg-primary/10 rounded-full flex items-center justify-center">
+                      <Icon name="User" size={18} className="text-primary" />
+                    </div>
+                    <div>
+                      <p className="font-medium text-sm">{user.full_name}</p>
+                      <p className="text-xs text-muted-foreground">Внутренний: {user.phone_extension}</p>
+                    </div>
+                  </div>
+                  <Badge className={getStatusBadgeColor(user.status)}>
+                    {getStatusLabel(user.status)}
+                  </Badge>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  };
+
+  const renderCalls = () => (
+    <Card>
+      <CardHeader>
+        <CardTitle>История звонков</CardTitle>
+        <CardDescription>Все звонки в системе</CardDescription>
+      </CardHeader>
+      <CardContent>
+        <div className="space-y-3">
+          {calls.map((call) => (
+            <div key={call.id} className="flex items-center justify-between p-4 border border-slate-200 rounded-lg">
+              <div className="flex items-center gap-4">
+                <div className="w-10 h-10 bg-primary/10 rounded-full flex items-center justify-center">
+                  <Icon name="Phone" size={18} className="text-primary" />
+                </div>
+                <div>
+                  <p className="font-medium text-sm">{call.caller_number}</p>
+                  <p className="text-xs text-muted-foreground">{call.operator_name || "Не назначен"}</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-4">
+                <div className="text-right">
+                  <p className="text-sm font-medium">{Math.floor(call.duration / 60)}:{(call.duration % 60).toString().padStart(2, '0')}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {new Date(call.started_at).toLocaleTimeString("ru-RU", { hour: '2-digit', minute: '2-digit' })}
+                  </p>
+                </div>
+                <Badge variant={call.status === "active" ? "default" : "secondary"}>
+                  {call.status === "active" ? "Активный" : call.status === "completed" ? "Завершен" : "В очереди"}
+                </Badge>
+              </div>
+            </div>
+          ))}
+        </div>
+      </CardContent>
+    </Card>
+  );
+
+  const renderEmployees = () => (
+    <div className="space-y-6">
+      {currentUser?.role === "super_admin" && (
+        <div className="flex justify-end">
+          <Button onClick={() => setIsAddUserOpen(true)}>
+            <Icon name="UserPlus" size={18} className="mr-2" />
+            Добавить сотрудника
+          </Button>
+        </div>
+      )}
+      
+      <Card>
+        <CardHeader>
+          <CardTitle>Все сотрудники</CardTitle>
+          <CardDescription>Управление сотрудниками контакт-центра</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-3">
+            {users.map((user) => (
+              <div key={user.id} className="flex items-center justify-between p-4 border border-slate-200 rounded-lg">
+                <div className="flex items-center gap-4">
+                  <div className="w-10 h-10 bg-primary/10 rounded-full flex items-center justify-center">
+                    <Icon name={user.role === "super_admin" ? "Shield" : "User"} size={18} className="text-primary" />
+                  </div>
+                  <div>
+                    <p className="font-medium text-sm">{user.full_name}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {user.username} • Внутренний: {user.phone_extension}
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-3">
+                  <Badge className={getStatusBadgeColor(user.status)}>
+                    {getStatusLabel(user.status)}
+                  </Badge>
+                  <Badge variant="outline">
+                    {user.role === "super_admin" ? "Администратор" : "Оператор"}
+                  </Badge>
+                  {currentUser?.role === "super_admin" && (
+                    <div className="flex gap-2">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => {
+                          setEditingUser(user);
+                          setIsEditUserOpen(true);
+                        }}
+                      >
+                        <Icon name="Edit" size={16} />
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="destructive"
+                        onClick={() => handleDeleteUser(user.id)}
+                      >
+                        <Icon name="Trash2" size={16} />
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
 
   return (
     <div className="min-h-screen bg-slate-50 flex">
@@ -98,7 +519,7 @@ const Index = () => {
               <Icon name="Phone" size={24} className="text-white" />
             </div>
             <div>
-              <h1 className="font-semibold text-lg">CallCenter</h1>
+              <h1 className="font-semibold text-lg">Sity-contact</h1>
               <p className="text-xs text-slate-300">Контакт-центр</p>
             </div>
           </div>
@@ -127,8 +548,10 @@ const Index = () => {
               <Icon name="User" size={20} />
             </div>
             <div className="flex-1">
-              <p className="font-medium text-sm">{username}</p>
-              <p className="text-xs text-slate-400">Оператор</p>
+              <p className="font-medium text-sm">{currentUser?.full_name}</p>
+              <p className="text-xs text-slate-400">
+                {currentUser?.role === "super_admin" ? "Администратор" : "Оператор"}
+              </p>
             </div>
             <Button
               variant="ghost"
@@ -159,130 +582,220 @@ const Index = () => {
               </p>
             </div>
             <div className="flex items-center gap-3">
-              <Button variant="outline" size="sm">
-                <Icon name="Bell" size={18} className="mr-2" />
-                Уведомления
-              </Button>
-              <Button variant="default" size="sm">
+              <Button variant="default" size="sm" onClick={() => setIsDialpadOpen(true)}>
                 <Icon name="PhoneCall" size={18} className="mr-2" />
-                Новый звонок
+                Набрать номер
               </Button>
             </div>
           </div>
         </header>
 
-        <div className="p-8 space-y-6">
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-            {stats.map((stat, index) => (
-              <Card key={index} className="hover:shadow-lg transition-shadow">
-                <CardContent className="pt-6">
-                  <div className="flex items-start justify-between">
-                    <div>
-                      <p className="text-sm font-medium text-muted-foreground">{stat.label}</p>
-                      <div className="flex items-baseline gap-2 mt-2">
-                        <h3 className="text-3xl font-bold">{stat.value}</h3>
-                        <span className={`text-sm font-medium ${stat.color}`}>{stat.trend}</span>
-                      </div>
-                    </div>
-                    <div className={`p-3 rounded-lg bg-slate-100`}>
-                      <Icon name={stat.icon} size={24} className="text-slate-600" />
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            <Card className="lg:col-span-2">
-              <CardHeader>
-                <CardTitle>Последние звонки</CardTitle>
-                <CardDescription>Активность операторов в реальном времени</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-3">
-                  {recentCalls.map((call) => (
-                    <div
-                      key={call.id}
-                      className="flex items-center justify-between p-4 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors"
-                    >
-                      <div className="flex items-center gap-4">
-                        <div className="w-10 h-10 bg-primary/10 rounded-full flex items-center justify-center">
-                          <Icon name="Phone" size={18} className="text-primary" />
-                        </div>
-                        <div>
-                          <p className="font-medium text-sm">{call.client}</p>
-                          <p className="text-xs text-muted-foreground">{call.operator}</p>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-4">
-                        <div className="text-right">
-                          <p className="text-sm font-medium">{call.duration}</p>
-                          <p className="text-xs text-muted-foreground">{call.time}</p>
-                        </div>
-                        <Badge
-                          variant={call.status === "active" ? "default" : "secondary"}
-                          className={call.status === "active" ? "bg-green-500" : ""}
-                        >
-                          {call.status === "active" ? "В процессе" : "Завершен"}
-                        </Badge>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </CardContent>
-            </Card>
-
+        <div className="p-8">
+          {activeSection === "dashboard" && renderDashboard()}
+          {activeSection === "calls" && renderCalls()}
+          {activeSection === "employees" && renderEmployees()}
+          {activeSection === "reports" && (
             <Card>
               <CardHeader>
-                <CardTitle>Активные операторы</CardTitle>
-                <CardDescription>24 из 30 на линии</CardDescription>
+                <CardTitle>Отчеты</CardTitle>
+                <CardDescription>Раздел в разработке</CardDescription>
               </CardHeader>
-              <CardContent>
-                <div className="space-y-4">
-                  {["Иванов И.И.", "Сидорова А.С.", "Смирнов П.К.", "Кузнецова М.В.", "Петров Д.Н."].map(
-                    (name, index) => (
-                      <div key={index} className="flex items-center justify-between">
-                        <div className="flex items-center gap-3">
-                          <div className="w-8 h-8 bg-primary/10 rounded-full flex items-center justify-center">
-                            <Icon name="User" size={16} className="text-primary" />
-                          </div>
-                          <span className="text-sm font-medium">{name}</span>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
-                          <span className="text-xs text-muted-foreground">Онлайн</span>
-                        </div>
-                      </div>
-                    )
-                  )}
-                </div>
-              </CardContent>
             </Card>
-          </div>
-
-          <Card>
-            <CardHeader>
-              <CardTitle>График звонков за день</CardTitle>
-              <CardDescription>Распределение нагрузки по часам</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="h-64 flex items-end justify-between gap-2">
-                {[45, 62, 58, 73, 89, 95, 87, 78, 92, 85, 67, 54].map((height, index) => (
-                  <div key={index} className="flex-1 flex flex-col items-center gap-2">
-                    <div className="w-full bg-primary/20 hover:bg-primary/40 rounded-t-lg transition-all cursor-pointer relative group" style={{ height: `${height}%` }}>
-                      <div className="absolute -top-8 left-1/2 -translate-x-1/2 bg-slate-800 text-white text-xs px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
-                        {Math.round(height * 1.2)} звонков
-                      </div>
-                    </div>
-                    <span className="text-xs text-muted-foreground">{9 + index}:00</span>
-                  </div>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
+          )}
+          {activeSection === "clients" && (
+            <Card>
+              <CardHeader>
+                <CardTitle>Клиенты</CardTitle>
+                <CardDescription>Раздел в разработке</CardDescription>
+              </CardHeader>
+            </Card>
+          )}
+          {activeSection === "settings" && (
+            <Card>
+              <CardHeader>
+                <CardTitle>Настройки</CardTitle>
+                <CardDescription>Раздел в разработке</CardDescription>
+              </CardHeader>
+            </Card>
+          )}
         </div>
       </main>
+
+      <Dialog open={isDialpadOpen} onOpenChange={setIsDialpadOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Набор номера</DialogTitle>
+            <DialogDescription>
+              Введите номер телефона и нажмите "Позвонить"
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <Input
+              value={dialNumber}
+              onChange={(e) => setDialNumber(e.target.value)}
+              placeholder="+7 (___) ___-__-__"
+              className="text-center text-2xl h-16"
+            />
+            <div className="grid grid-cols-3 gap-3">
+              {["1", "2", "3", "4", "5", "6", "7", "8", "9", "*", "0", "#"].map((digit) => (
+                <Button
+                  key={digit}
+                  variant="outline"
+                  size="lg"
+                  onClick={() => handleDialpadClick(digit)}
+                  className="text-xl h-16"
+                >
+                  {digit}
+                </Button>
+              ))}
+            </div>
+          </div>
+          <DialogFooter className="sm:justify-between">
+            <Button variant="outline" onClick={() => setDialNumber("")}>
+              Очистить
+            </Button>
+            <Button onClick={handleCall} className="gap-2">
+              <Icon name="Phone" size={18} />
+              Позвонить
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={isEditUserOpen} onOpenChange={setIsEditUserOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Редактировать сотрудника</DialogTitle>
+          </DialogHeader>
+          {editingUser && (
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label>Полное имя</Label>
+                <Input
+                  value={editingUser.full_name}
+                  onChange={(e) => setEditingUser({ ...editingUser, full_name: e.target.value })}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Логин</Label>
+                <Input
+                  value={editingUser.username}
+                  onChange={(e) => setEditingUser({ ...editingUser, username: e.target.value })}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Внутренний номер</Label>
+                <Input
+                  value={editingUser.phone_extension}
+                  onChange={(e) => setEditingUser({ ...editingUser, phone_extension: e.target.value })}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Статус</Label>
+                <Select
+                  value={editingUser.status}
+                  onValueChange={(value) => setEditingUser({ ...editingUser, status: value })}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="online">Онлайн</SelectItem>
+                    <SelectItem value="offline">Офлайн</SelectItem>
+                    <SelectItem value="busy">Занят</SelectItem>
+                    <SelectItem value="break">Перерыв</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>Роль</Label>
+                <Select
+                  value={editingUser.role}
+                  onValueChange={(value) => setEditingUser({ ...editingUser, role: value })}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="operator">Оператор</SelectItem>
+                    <SelectItem value="super_admin">Администратор</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsEditUserOpen(false)}>
+              Отмена
+            </Button>
+            <Button onClick={handleUpdateUser}>Сохранить</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={isAddUserOpen} onOpenChange={setIsAddUserOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Добавить сотрудника</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label>Полное имя *</Label>
+              <Input
+                value={newUser.full_name}
+                onChange={(e) => setNewUser({ ...newUser, full_name: e.target.value })}
+                placeholder="Иванов Иван Иванович"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Логин *</Label>
+              <Input
+                value={newUser.username}
+                onChange={(e) => setNewUser({ ...newUser, username: e.target.value })}
+                placeholder="ivanov"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Пароль *</Label>
+              <Input
+                type="password"
+                value={newUser.password}
+                onChange={(e) => setNewUser({ ...newUser, password: e.target.value })}
+                placeholder="********"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Внутренний номер</Label>
+              <Input
+                value={newUser.phone_extension}
+                onChange={(e) => setNewUser({ ...newUser, phone_extension: e.target.value })}
+                placeholder="1010"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Роль</Label>
+              <Select
+                value={newUser.role}
+                onValueChange={(value) => setNewUser({ ...newUser, role: value })}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="operator">Оператор</SelectItem>
+                  <SelectItem value="super_admin">Администратор</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsAddUserOpen(false)}>
+              Отмена
+            </Button>
+            <Button onClick={handleAddUser}>Добавить</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };
